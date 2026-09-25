@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # A tampered gradle-wrapper.jar would run arbitrary code in every job below.
+  wrapper:
+    name: Validate Gradle wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/actions/wrapper-validation@v4
+
+  build:
+    name: Java ${{ matrix.java }}
+    needs: wrapper
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 17 is the declared floor, compiled with --release 17. 21 and 25 are
+        # the newer LTS lines merchants are most likely to run.
+        java: ["17", "21", "25"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # build = compile with -Werror, tests, and javadoc with doclint as errors,
+      # which Maven Central needs to accept the javadoc jar.
+      - name: Build
+        run: ./gradlew build
+
+  spring-boot:
+    name: Spring Boot ${{ matrix.boot }}
+    needs: wrapper
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The starter compiles against the oldest supported line, then is
+        # tested against each supported line, because Boot 4 moved packages.
+        boot: ["3.5.16", "4.1.1"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test the starter
+        run: ./gradlew :epay-spring-boot-starter:test -PspringBootVersion=${{ matrix.boot }}
+
+  versions:
+    name: Versions agree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The version is declared twice: gradle.properties for the artifacts and
+      # Epay.VERSION for the User-Agent. They must not drift.
+      - name: Compare gradle.properties with Epay.VERSION
+        run: |
+          PROPERTY=$(grep -E '^VERSION_NAME=' gradle.properties | cut -d= -f2)
+          CONSTANT=$(grep -oE 'VERSION = "[^"]+"' epay-java/src/main/java/com/epayethiopia/epay/Epay.java | cut -d'"' -f2)
+          echo "gradle.properties=$PROPERTY Epay.VERSION=$CONSTANT"
+          [ "$PROPERTY" = "$CONSTANT" ] || {
+            echo "::error::gradle.properties VERSION_NAME is $PROPERTY but Epay.VERSION is $CONSTANT"
+            exit 1
+          }
