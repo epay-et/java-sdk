@@ -1,18 +1,31 @@
 package com.epayethiopia.epay.model;
 
+import java.util.List;
+import java.util.Optional;
+
 /**
- * A full provider entry from {@code GET /v1/payment-providers}.
+ * A provider from {@code GET /v1/payment-providers}, with the flows it supports.
  *
- * @param providerCode identifies the provider, such as {@code cbe_birr} or {@code telebirr}
+ * @param providerCode identifies the provider, such as {@code TELEBIRR}; pass it to
+ *     {@code DirectPaymentParams.Builder#pspCode}
  * @param providerName the display name, or null
- * @param providerCategory commonly {@code bank} or {@code mobile_money}, or null
- * @param flowCode the payment flow, such as {@code mobile_banking}, {@code ussd}, or {@code qr}
- * @param enabled whether your account has this provider enabled; disabled providers
- *     are still returned so your UI can show them as unavailable
+ * @param providerCategory commonly {@code wallet} or {@code bank}, or null
+ * @param flows the payment flows the provider supports
  */
 public record Provider(
-        String providerCode,
-        String providerName,
-        String providerCategory,
-        String flowCode,
-        boolean enabled) {}
+        String providerCode, String providerName, String providerCategory, List<ProviderFlow> flows) {
+
+    public Provider {
+        flows = flows == null ? List.of() : List.copyOf(flows);
+    }
+
+    /** The provider's recommended flow, if it marks one. */
+    public Optional<ProviderFlow> defaultFlow() {
+        return flows.stream().filter(ProviderFlow::isDefault).findFirst();
+    }
+
+    /** Whether any of the provider's flows accepts a direct payment. */
+    public boolean supportsDirectPayment() {
+        return flows.stream().anyMatch(ProviderFlow::supportsDirectPayment);
+    }
+}

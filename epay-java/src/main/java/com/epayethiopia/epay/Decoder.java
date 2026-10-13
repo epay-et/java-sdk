@@ -11,11 +11,15 @@ import java.util.List;
 import java.util.Map;
 
 import com.epayethiopia.epay.model.Customer;
+import com.epayethiopia.epay.model.DirectPayment;
 import com.epayethiopia.epay.model.EventType;
 import com.epayethiopia.epay.model.InitializedPayment;
 import com.epayethiopia.epay.model.Mode;
 import com.epayethiopia.epay.model.Provider;
+import com.epayethiopia.epay.model.ProviderFlow;
 import com.epayethiopia.epay.model.ProviderItem;
+import com.epayethiopia.epay.model.Receipt;
+import com.epayethiopia.epay.model.SmsLink;
 import com.epayethiopia.epay.model.Timeline;
 import com.epayethiopia.epay.model.TimelineEvent;
 import com.epayethiopia.epay.model.Transaction;
@@ -91,14 +95,52 @@ final class Decoder {
     static List<Provider> providers(Map<String, Object> json) {
         List<Provider> providers = new ArrayList<>();
         for (Map<String, Object> item : objects(json.get("data"))) {
+            List<ProviderFlow> flows = new ArrayList<>();
+            for (Map<String, Object> flow : objects(item.get("flows"))) {
+                flows.add(new ProviderFlow(
+                        string(flow, "flowCode"), bool(flow, "isDefault"), bool(flow, "supportsDirectPayment")));
+            }
             providers.add(new Provider(
                     string(item, "providerCode"),
                     string(item, "providerName"),
                     string(item, "providerCategory"),
-                    string(item, "flowCode"),
-                    Boolean.TRUE.equals(item.get("isEnabled"))));
+                    flows));
         }
         return List.copyOf(providers);
+    }
+
+    static DirectPayment directPayment(Map<String, Object> json) {
+        Map<String, Object> attempt = object(json.get("attempt"));
+        return new DirectPayment(
+                string(json, "reference"),
+                status(json),
+                decimal(json, "chargeAmount"),
+                decimal(json, "feeAmount"),
+                attempt == null ? Map.of() : attempt);
+    }
+
+    static SmsLink smsLink(Map<String, Object> json) {
+        return new SmsLink(
+                string(json, "message"),
+                string(json, "checkoutUrl"),
+                string(json, "customerPhone"),
+                decimal(json, "amount"),
+                string(json, "currencyCode"));
+    }
+
+    static Receipt receipt(Map<String, Object> json) {
+        return new Receipt(
+                string(json, "reference"),
+                string(json, "merchantReference"),
+                status(json),
+                decimal(json, "amount"),
+                decimal(json, "chargeAmount"),
+                decimal(json, "feeAmount"),
+                string(json, "currencyCode"),
+                string(json, "paymentMethod"),
+                customer(json),
+                instant(json, "paidAt"),
+                instant(json, "createdAt"));
     }
 
     static List<Transaction> transactions(Object data) {
@@ -125,6 +167,10 @@ final class Decoder {
                 customer(json),
                 instant(json, "paidAt"),
                 instant(json, "createdAt"),
+                string(json, "customerPhone"),
+                string(json, "pspCode"),
+                instant(json, "occurredAt"),
+                string(json, "reason"),
                 json);
     }
 

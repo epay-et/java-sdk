@@ -44,7 +44,7 @@ import com.epayethiopia.epay.model.Mode;
 public final class Epay {
 
     /** The SDK version, sent in the User-Agent. */
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.2.0";
 
     /** The production API root. */
     public static final String DEFAULT_BASE_URL = "https://api.epayethiopia.com/v1";

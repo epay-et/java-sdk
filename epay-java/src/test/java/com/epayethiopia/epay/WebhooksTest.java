@@ -101,6 +101,18 @@ class WebhooksTest {
     }
 
     @Test
+    void decodesDirectPaymentFields() {
+        String body = "{\"event\":\"payment.failed\",\"reference\":\"A3BX72KP\",\"pspCode\":\"TELEBIRR\","
+                + "\"customerPhone\":\"+251911234567\",\"reason\":\"Customer cancelled\","
+                + "\"occurredAt\":\"2026-10-12T09:16:30.000Z\"}";
+        WebhookEvent event = webhooks.constructEvent(body, webhooks.sign(body));
+        assertThat(event.pspCode()).isEqualTo("TELEBIRR");
+        assertThat(event.reason()).isEqualTo("Customer cancelled");
+        assertThat(event.occurredAt()).isEqualTo(Instant.parse("2026-10-12T09:16:30Z"));
+        assertThat(event.type()).isEqualTo(EventType.PAYMENT_FAILED);
+    }
+
+    @Test
     void rejectsSignedBodiesThatAreNotObjects() {
         assertThatThrownBy(() -> webhooks.constructEvent("[1]", webhooks.sign("[1]")))
                 .isInstanceOf(EpayValidationException.class).hasMessageContaining("JSON object");

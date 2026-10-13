@@ -51,17 +51,7 @@ public final class InitializeParams {
         this.returnUrl = builder.returnUrl;
         this.callbackUrl = builder.callbackUrl;
 
-        if (builder.idempotencyKey != null) {
-            if (builder.idempotencyKey.isBlank()) {
-                throw new EpayValidationException("idempotencyKey must not be blank");
-            }
-            if (builder.idempotencyKey.length() > Validation.MAX_IDEMPOTENCY_KEY_LENGTH) {
-                throw new EpayValidationException(
-                        "idempotencyKey must be at most " + Validation.MAX_IDEMPOTENCY_KEY_LENGTH
-                                + " characters, received " + builder.idempotencyKey.length());
-            }
-        }
-        this.idempotencyKey = builder.idempotencyKey;
+        this.idempotencyKey = Validation.checkIdempotencyKey(builder.idempotencyKey);
     }
 
     public static Builder builder() {

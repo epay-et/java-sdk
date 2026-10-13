@@ -3,6 +3,7 @@ package com.epayethiopia.epay;
 import java.util.List;
 
 import com.epayethiopia.epay.model.Provider;
+import com.epayethiopia.epay.model.ProviderFlow;
 import com.epayethiopia.epay.model.ProviderItem;
 
 /**
@@ -30,9 +31,8 @@ public final class PaymentProviders {
     }
 
     /**
-     * Every provider with its category and enabled state. Disabled providers are
-     * included so your UI can show them as unavailable. Requires the
-     * {@code get_platform_payment_provider} permission.
+     * Every provider available to the account, each with the payment flows it
+     * supports. Requires the {@code get_platform_payment_provider} permission.
      *
      * @throws com.epayethiopia.epay.exception.EpayPermissionDeniedException {@code 403} — key lacks the permission
      */
@@ -40,8 +40,34 @@ public final class PaymentProviders {
         return Decoder.providers(transport.requestObject("GET", "/payment-providers", null, null, null, null));
     }
 
-    /** Only the providers the account can currently route through. */
+    /**
+     * The providers that can take a direct payment, keeping only their
+     * direct-payment flows. Providers with no such flow are left out.
+     *
+     * <p>Pass a provider's {@code providerCode} to
+     * {@link DirectPaymentParams.Builder#pspCode}, and pre-select
+     * {@link Provider#defaultFlow()}.
+     */
+    public List<Provider> listForDirectPayment() {
+        return getAll().stream()
+                .map(provider -> new Provider(
+                        provider.providerCode(),
+                        provider.providerName(),
+                        provider.providerCategory(),
+                        provider.flows().stream().filter(ProviderFlow::supportsDirectPayment).toList()))
+                .filter(provider -> !provider.flows().isEmpty())
+                .toList();
+    }
+
+    /**
+     * Returns the same list as {@link #getAll()}.
+     *
+     * @deprecated The API no longer reports a per-provider enabled state: every
+     *     provider it returns is available to the account. Use {@link #getAll()}
+     *     or {@link #listForDirectPayment()}.
+     */
+    @Deprecated(since = "0.2.0")
     public List<Provider> listEnabled() {
-        return getAll().stream().filter(Provider::enabled).toList();
+        return getAll();
     }
 }

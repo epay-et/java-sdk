@@ -35,8 +35,12 @@ import com.epayethiopia.epay.exception.EpayTimeoutException;
 import com.epayethiopia.epay.exception.EpayUnprocessableEntityException;
 import com.epayethiopia.epay.exception.EpayValidationException;
 import com.epayethiopia.epay.http.EpayHttpRequest;
+import com.epayethiopia.epay.model.DirectPayment;
 import com.epayethiopia.epay.model.Mode;
 import com.epayethiopia.epay.model.Provider;
+import com.epayethiopia.epay.model.ProviderFlow;
+import com.epayethiopia.epay.model.Receipt;
+import com.epayethiopia.epay.model.SmsLink;
 import com.epayethiopia.epay.model.Timeline;
 import com.epayethiopia.epay.model.Transaction;
 import com.epayethiopia.epay.model.TransactionStatus;
@@ -583,10 +587,12 @@ class ClientTest {
     @Nested
     class Providers {
 
-        static final String ALL = "{\"data\":[{\"providerCode\":\"telebirr\",\"providerName\":\"telebirr\","
-                + "\"providerCategory\":\"mobile_money\",\"flowCode\":\"ussd\",\"isEnabled\":true},"
-                + "{\"providerCode\":\"cbe_birr\",\"providerName\":\"CBE Birr\",\"providerCategory\":\"bank\","
-                + "\"flowCode\":\"mobile_banking\",\"isEnabled\":false}]}";
+        static final String ALL = "{\"data\":[{\"providerCode\":\"TELEBIRR\",\"providerName\":\"TeleBirr\","
+                + "\"providerCategory\":\"wallet\",\"flows\":["
+                + "{\"flowCode\":\"USSD\",\"isDefault\":true,\"supportsDirectPayment\":true},"
+                + "{\"flowCode\":\"SMS_OTP\",\"isDefault\":false,\"supportsDirectPayment\":false}]},"
+                + "{\"providerCode\":\"CBE\",\"providerName\":\"CBE\",\"providerCategory\":\"bank\","
+                + "\"flows\":[{\"flowCode\":\"QR\",\"isDefault\":true,\"supportsDirectPayment\":false}]}]}";
 
         @Test
         void listsCompactEntries() {
@@ -600,11 +606,134 @@ class ClientTest {
         }
 
         @Test
-        void filtersEnabledProviders() {
-            http.reply(200, ALL).reply(200, ALL);
-            assertThat(client().paymentProviders().getAll()).hasSize(2);
+        void decodesGroupedFlows() {
+            http.reply(200, ALL);
+            List<Provider> providers = client().paymentProviders().getAll();
+            assertThat(http.last().uri().getPath()).isEqualTo("/v1/payment-providers");
+            assertThat(providers).hasSize(2);
+            assertThat(providers.get(0).flows()).extracting(ProviderFlow::flowCode).containsExactly("USSD", "SMS_OTP");
+            assertThat(providers.get(0).defaultFlow()).map(ProviderFlow::flowCode).contains("USSD");
+            assertThat(providers.get(1).supportsDirectPayment()).isFalse();
+        }
+
+        @Test
+        void listsOnlyDirectPaymentFlows() {
+            http.reply(200, ALL);
+            List<Provider> providers = client().paymentProviders().listForDirectPayment();
+            assertThat(providers).singleElement().satisfies(provider -> {
+                assertThat(provider.providerCode()).isEqualTo("TELEBIRR");
+                assertThat(provider.flows()).extracting(ProviderFlow::flowCode).containsExactly("USSD");
+            });
+        }
+
+        @Test
+        @SuppressWarnings("deprecation")
+        void theDeprecatedListEnabledReturnsEveryProvider() {
+            http.reply(200, ALL);
             assertThat(client().paymentProviders().listEnabled()).extracting(Provider::providerCode)
-                    .containsExactly("telebirr");
+                    .containsExactly("TELEBIRR", "CBE");
+        }
+    }
+
+    @Nested
+    class DirectPaymentSmsLinkAndReceipt {
+
+        static final String DIRECT = "{\"reference\":\"A3BX72KP\",\"status\":\"pending\","
+                + "\"chargeAmount\":\"250.00\",\"feeAmount\":\"5.00\",\"attempt\":{\"session\":\"s1\"}}";
+
+        static DirectPaymentParams.Builder charge() {
+            return DirectPaymentParams.builder()
+                    .amount("10").currencyCode("ETB").customerPhone("0911234567").pspCode("TELEBIRR");
+        }
+
+        @Test
+        void directPaymentSendsANormalizedBody() {
+            http.reply(200, DIRECT);
+
+            DirectPayment charge = client().payments().directPayment(DirectPaymentParams.builder()
+                    .amount(new BigDecimal("250"))
+                    .currencyCode("etb")
+                    .customerPhone("0911 234 567")
+                    .pspCode(" TELEBIRR ")
+                    .flowCode("USSD")
+                    .merchantReference("order_456")
+                    .idempotencyKey("order_456")
+                    .build());
+
+            assertThat(charge.reference()).isEqualTo("A3BX72KP");
+            assertThat(charge.status()).isEqualTo(TransactionStatus.PENDING);
+            assertThat(charge.feeAmount()).isEqualByComparingTo("5.00");
+            assertThat(charge.attempt()).containsEntry("session", "s1");
+
+            EpayHttpRequest request = http.last();
+            assertThat(request.method()).isEqualTo("POST");
+            assertThat(request.uri().getPath()).isEqualTo("/v1/transactions/direct");
+            assertThat(request.headers()).containsEntry("x-idempotency-key", "order_456");
+            assertThat(ScriptedHttpClient.bodyOf(request)).isEqualTo("{\"amount\":\"250.00\",\"currencyCode\":\"ETB\","
+                    + "\"customerPhone\":\"+251911234567\",\"pspCode\":\"TELEBIRR\",\"flowCode\":\"USSD\","
+                    + "\"merchantReference\":\"order_456\"}");
+        }
+
+        @Test
+        void directPaymentRetriesWithOneGeneratedKey() {
+            http.reply(503, "{}").reply(200, DIRECT);
+
+            client().payments().directPayment(charge().build());
+
+            assertThat(http.requests).hasSize(2);
+            String key = http.requests.get(0).headers().get("x-idempotency-key");
+            assertThat(key).matches("epay_[0-9a-f]{32}");
+            assertThat(http.requests.get(1).headers()).containsEntry("x-idempotency-key", key);
+            assertThat(ScriptedHttpClient.bodyOf(http.requests.get(0))).doesNotContain("flowCode");
+        }
+
+        @Test
+        void directPaymentValidatesBeforeSending() {
+            assertThatThrownBy(() -> charge().pspCode("  ").build())
+                    .isInstanceOf(EpayValidationException.class).hasMessageContaining("pspCode");
+            assertThatThrownBy(() -> charge().pspCode(null).build())
+                    .isInstanceOf(EpayValidationException.class).hasMessageContaining("pspCode");
+            assertThatThrownBy(() -> charge().flowCode(" ").build())
+                    .isInstanceOf(EpayValidationException.class).hasMessageContaining("flowCode");
+            assertThatThrownBy(() -> charge().idempotencyKey("k".repeat(256)).build())
+                    .isInstanceOf(EpayValidationException.class).hasMessageContaining("255");
+            assertThat(http.requests).isEmpty();
+        }
+
+        @Test
+        void sendSmsLinkIsNormalizedAndNeverRetried() {
+            http.reply(200, "{\"message\":\"Checkout link sent via SMS\",\"checkoutUrl\":\"https://x\","
+                    + "\"customerPhone\":\"+251911234567\",\"amount\":\"500.00\",\"currencyCode\":\"ETB\"}");
+
+            SmsLink link = client().payments().sendSmsLink(SmsLinkParams.builder()
+                    .customerPhone("0911234567").currencyCode("etb").amount("500").build());
+
+            assertThat(link.amount()).isEqualByComparingTo("500.00");
+            assertThat(http.last().uri().getPath()).isEqualTo("/v1/transactions/sms-link");
+            assertThat(ScriptedHttpClient.bodyOf(http.last()))
+                    .isEqualTo("{\"customerPhone\":\"+251911234567\",\"currencyCode\":\"ETB\",\"amount\":\"500.00\"}");
+
+            http.reply(503, "{}");
+            assertThatThrownBy(() -> client().payments().sendSmsLink(SmsLinkParams.builder()
+                            .customerPhone("0911234567").currencyCode("ETB").build()))
+                    .isInstanceOf(EpayServerException.class);
+            assertThat(http.requests).hasSize(2);
+            assertThat(ScriptedHttpClient.bodyOf(http.last())).doesNotContain("amount");
+        }
+
+        @Test
+        void receiptDecodesAnyTerminalStatus() {
+            http.reply(200, "{\"reference\":\"A3BX72KP\",\"status\":\"failed\",\"amount\":\"250.00\","
+                    + "\"chargeAmount\":\"250.00\",\"feeAmount\":null,\"customer\":{\"phone\":\"+251911234567\"},"
+                    + "\"paidAt\":null,\"createdAt\":\"2026-10-12T09:10:00.000Z\"}");
+
+            Receipt receipt = client().payments().receipt("A3BX72KP");
+
+            assertThat(http.last().uri().getPath()).isEqualTo("/v1/transactions/A3BX72KP/receipt");
+            assertThat(receipt.status()).isEqualTo(TransactionStatus.FAILED);
+            assertThat(receipt.paidAt()).isNull();
+            assertThat(receipt.feeAmount()).isNull();
+            assertThat(receipt.createdAt()).isEqualTo(Instant.parse("2026-10-12T09:10:00Z"));
         }
     }
 

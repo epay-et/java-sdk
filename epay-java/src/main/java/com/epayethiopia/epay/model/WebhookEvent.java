@@ -23,6 +23,10 @@ import java.util.Map;
  * @param customer the customer's details
  * @param paidAt when the payment completed; null for every non-success event
  * @param createdAt when the transaction was created
+ * @param customerPhone the customer's phone number, on direct payment events; otherwise null
+ * @param pspCode the provider charged, on direct payment events; otherwise null
+ * @param occurredAt when the event occurred, or null
+ * @param reason why the payment failed, on {@code payment.failed}; otherwise null
  * @param raw the full decoded payload, including any field this SDK version does not model
  */
 public record WebhookEvent(
@@ -39,6 +43,10 @@ public record WebhookEvent(
         Customer customer,
         Instant paidAt,
         Instant createdAt,
+        String customerPhone,
+        String pspCode,
+        Instant occurredAt,
+        String reason,
         Map<String, Object> raw) {
 
     public WebhookEvent {

@@ -185,6 +185,21 @@ public final class Validation {
         return code;
     }
 
+    /** Validates an optional idempotency key, returning it unchanged. */
+    static String checkIdempotencyKey(String key) {
+        if (key == null) {
+            return null;
+        }
+        if (key.isBlank()) {
+            throw new EpayValidationException("idempotencyKey must not be blank");
+        }
+        if (key.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
+            throw new EpayValidationException("idempotencyKey must be at most " + MAX_IDEMPOTENCY_KEY_LENGTH
+                    + " characters, received " + key.length());
+        }
+        return key;
+    }
+
     /** Validates a transaction reference is present and trims it. */
     static String requireReference(String value) {
         String reference = value == null ? "" : value.strip();
