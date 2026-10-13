@@ -13,7 +13,7 @@ tasks.jar {
         attributes(
             "Automatic-Module-Name" to "com.epayethiopia.epay",
             "Implementation-Title" to "epay-java",
-            "Implementation-Version" to project.version,
+            "Implementation-Version" to providers.gradleProperty("VERSION_NAME").get(),
         )
     }
 }

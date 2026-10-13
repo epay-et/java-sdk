@@ -30,7 +30,7 @@ tasks.jar {
         attributes(
             "Automatic-Module-Name" to "com.epayethiopia.epay.spring",
             "Implementation-Title" to "epay-spring-boot-starter",
-            "Implementation-Version" to project.version,
+            "Implementation-Version" to providers.gradleProperty("VERSION_NAME").get(),
         )
     }
 }
